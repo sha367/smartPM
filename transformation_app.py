@@ -929,6 +929,14 @@ def show_section_data(section_name, section_description, project_id):
 def main():
     """Основная функция приложения"""
     
+    # Инициализация session state
+    if 'current_view' not in st.session_state:
+        st.session_state.current_view = "projects_list"
+    if 'selected_project_id' not in st.session_state:
+        st.session_state.selected_project_id = None
+    if 'selected_section' not in st.session_state:
+        st.session_state.selected_section = None
+    
     # Инициализация данных при первом запуске
     if 'excel_data' not in st.session_state:
         with st.spinner("Загружаем данные из Excel файлов..."):
