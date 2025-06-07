@@ -7,6 +7,8 @@ import uuid
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import tempfile
+import shutil
 
 # Конфигурация страницы
 st.set_page_config(
@@ -141,8 +143,8 @@ def create_summary_dashboard():
         st.warning("⚠️ Нет данных для отображения")
         return
     
-    # Создаем метрики
-    col1, col2, col3, col4 = st.columns(4)
+    # Создаем метрики (убрали конверсию)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         st.metric("Всего проектов", len(all_projects_data))
@@ -172,24 +174,6 @@ def create_summary_dashboard():
                 except:
                     pass
         st.metric("Общий эффект 2026", f"{total_effect_2026} млн ₽")
-    
-    with col4:
-        # Средняя конверсия
-        avg_conversion = 0
-        conversion_count = 0
-        for project_data in all_projects_data.values():
-            calc_data = project_data["data"].get("c. Поддерживающие расчеты", pd.DataFrame())
-            if not calc_data.empty and "Будущее состояние" in calc_data.columns:
-                try:
-                    conv = float(calc_data["Будущее состояние"].iloc[0]) if len(calc_data) > 0 else 0
-                    if conv > 0:
-                        avg_conversion += conv
-                        conversion_count += 1
-                except:
-                    pass
-        if conversion_count > 0:
-            avg_conversion = avg_conversion / conversion_count
-        st.metric("Средняя целевая конверсия", f"{avg_conversion:.1%}")
     
     # График финансового эффекта
     st.subheader("💰 Финансовый эффект по годам")
@@ -250,6 +234,195 @@ def create_summary_dashboard():
     if projects_summary:
         summary_df = pd.DataFrame(projects_summary)
         st.dataframe(summary_df, use_container_width=True)
+
+def show_project_management():
+    """Страница управления проектами"""
+    st.header("📋 Управление проектами")
+    
+    tabs = st.tabs(["📝 Список проектов", "➕ Добавить проект", "🗑️ Управление проектами"])
+    
+    with tabs[0]:
+        show_projects_list()
+    
+    with tabs[1]:
+        show_add_project_form()
+    
+    with tabs[2]:
+        show_project_management_tools()
+
+def show_projects_list():
+    """Показываем список всех проектов"""
+    st.subheader("📝 Список всех проектов")
+    
+    projects_data = []
+    for project_id, project_info in EXCEL_FILES.items():
+        # Пытаемся загрузить данные
+        data = load_business_case_data(project_id)
+        status = "✅ Загружен" if data else "❌ Ошибка"
+        
+        projects_data.append({
+            "ID": project_id,
+            "Название": project_info["name"],
+            "Владелец": project_info["owner"],
+            "Описание": project_info["description"][:50] + "...",
+            "Файл": project_info["file"],
+            "Статус": status
+        })
+    
+    if projects_data:
+        df = pd.DataFrame(projects_data)
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.info("📭 Нет проектов для отображения")
+
+def show_add_project_form():
+    """Форма добавления нового проекта"""
+    st.subheader("➕ Добавить новый проект")
+    
+    with st.form("add_project_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            project_name = st.text_input("📋 Название проекта *", 
+                                       placeholder="Введите название проекта")
+            project_owner = st.text_input("👤 Владелец проекта *",
+                                        placeholder="ФИО владельца")
+            
+        with col2:
+            project_description = st.text_area("📝 Описание проекта *",
+                                             placeholder="Краткое описание проекта",
+                                             height=100)
+        
+        uploaded_file = st.file_uploader("📎 Excel файл с данными",
+                                       type=['xlsx', 'xls'],
+                                       help="Загрузите Excel файл с структурой бизнес-кейса")
+        
+        submitted = st.form_submit_button("✅ Добавить проект", type="primary")
+        
+        if submitted:
+            if not project_name or not project_owner or not project_description:
+                st.error("❌ Заполните все обязательные поля")
+            elif not uploaded_file:
+                st.error("❌ Загрузите Excel файл")
+            else:
+                # Создаем новый проект
+                success = add_new_project(project_name, project_owner, project_description, uploaded_file)
+                if success:
+                    st.success("✅ Проект успешно добавлен!")
+                    st.rerun()
+                else:
+                    st.error("❌ Ошибка при добавлении проекта")
+
+def add_new_project(name, owner, description, uploaded_file):
+    """Добавляем новый проект"""
+    try:
+        # Генерируем уникальный ID
+        project_id = f"project_{uuid.uuid4().hex[:8]}"
+        
+        # Сохраняем загруженный файл
+        file_extension = uploaded_file.name.split('.')[-1]
+        filename = f"Бизнес_кейс_{owner.replace(' ', '_')}.{file_extension}"
+        
+        with open(filename, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        
+        # Добавляем в словарь проектов
+        global EXCEL_FILES
+        EXCEL_FILES[project_id] = {
+            "file": filename,
+            "name": name,
+            "owner": owner,
+            "description": description
+        }
+        
+        # Очищаем кэш чтобы новые данные загрузились
+        st.cache_data.clear()
+        
+        return True
+        
+    except Exception as e:
+        st.error(f"Ошибка при добавлении проекта: {e}")
+        return False
+
+def show_project_management_tools():
+    """Инструменты управления проектами"""
+    st.subheader("🗑️ Управление проектами")
+    
+    if not EXCEL_FILES:
+        st.info("📭 Нет проектов для управления")
+        return
+    
+    # Выбор проекта для удаления
+    project_options = {
+        f"{info['name']} (ID: {project_id})": project_id 
+        for project_id, info in EXCEL_FILES.items()
+    }
+    
+    selected_project_display = st.selectbox(
+        "🎯 Выберите проект для управления:",
+        options=list(project_options.keys())
+    )
+    
+    if selected_project_display:
+        selected_project_id = project_options[selected_project_display]
+        project_info = EXCEL_FILES[selected_project_id]
+        
+        # Информация о проекте
+        st.info(f"""
+        **Название:** {project_info['name']}  
+        **Владелец:** {project_info['owner']}  
+        **Описание:** {project_info['description']}  
+        **Файл:** {project_info['file']}
+        """)
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("🗑️ Удалить проект", type="secondary"):
+                success = delete_project(selected_project_id)
+                if success:
+                    st.success("✅ Проект удален!")
+                    st.rerun()
+                else:
+                    st.error("❌ Ошибка при удалении")
+        
+        with col2:
+            if st.button("🔄 Перезагрузить данные"):
+                st.cache_data.clear()
+                st.success("✅ Кэш очищен!")
+                st.rerun()
+        
+        with col3:
+            # Скачивание Excel файла
+            if os.path.exists(project_info['file']):
+                with open(project_info['file'], "rb") as file:
+                    st.download_button(
+                        label="📥 Скачать Excel",
+                        data=file,
+                        file_name=project_info['file'],
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+
+def delete_project(project_id):
+    """Удаляем проект"""
+    try:
+        if project_id in EXCEL_FILES:
+            project_info = EXCEL_FILES[project_id]
+            
+            # Удаляем файл если он существует
+            if os.path.exists(project_info['file']):
+                os.remove(project_info['file'])
+            
+            # Удаляем из словаря
+            del EXCEL_FILES[project_id]
+            
+            # Очищаем кэш
+            st.cache_data.clear()
+            
+            return True
+    except Exception as e:
+        st.error(f"Ошибка при удалении проекта: {e}")
+        return False
 
 def show_project_details(business_case_id):
     """Показываем детали конкретного проекта"""
@@ -418,7 +591,7 @@ def show_financial_impact(finance_data):
 # Основная функция приложения
 def main():
     st.title("🎯 Business Case Manager")
-    st.caption("Система управления бизнес-кейсами v3.0")
+    st.caption("Система управления бизнес-кейсами v3.1")
     
     # Боковая панель с навигацией
     with st.sidebar:
@@ -426,22 +599,26 @@ def main():
         
         page = st.selectbox(
             "Выберите страницу:",
-            ["📊 Сводная дашборд", "📋 Проекты"]
+            ["📊 Сводная дашборд", "📋 Управление проектами", "🎯 Просмотр проекта"]
         )
         
-        if page == "📋 Проекты":
-            st.subheader("Выберите проект:")
-            project_options = {
-                f"🎯 {info['name']}": project_id 
-                for project_id, info in EXCEL_FILES.items()
-            }
-            
-            selected_project_display = st.selectbox(
-                "Проект:",
-                options=list(project_options.keys())
-            )
-            
-            selected_project = project_options[selected_project_display]
+        if page == "🎯 Просмотр проекта":
+            if EXCEL_FILES:
+                st.subheader("Выберите проект:")
+                project_options = {
+                    f"🎯 {info['name']}": project_id 
+                    for project_id, info in EXCEL_FILES.items()
+                }
+                
+                selected_project_display = st.selectbox(
+                    "Проект:",
+                    options=list(project_options.keys())
+                )
+                
+                selected_project = project_options[selected_project_display]
+            else:
+                st.warning("⚠️ Нет доступных проектов")
+                selected_project = None
         else:
             selected_project = None
         
@@ -459,7 +636,9 @@ def main():
     # Основное содержимое
     if page == "📊 Сводная дашборд":
         create_summary_dashboard()
-    elif page == "📋 Проекты" and selected_project:
+    elif page == "📋 Управление проектами":
+        show_project_management()
+    elif page == "🎯 Просмотр проекта" and selected_project:
         show_project_details(selected_project)
     else:
         st.info("👈 Выберите страницу в боковой панели")
