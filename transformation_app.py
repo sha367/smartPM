@@ -108,7 +108,7 @@ def load_excel_data():
     """Загружаем все листы из Excel файлов"""
     all_data = {}
     
-        # Используем только файл Михненко для всех проектов
+    # Используем только файл Михненко для всех проектов
     master_file = "Бизнес_кейс_Михненко_Екатерина.xlsx"
     
     try:
@@ -117,19 +117,65 @@ def load_excel_data():
             filename = os.path.basename(master_file).replace('.xlsx', '')
             
             for sheet_name, df in excel_data.items():
+                # Очищаем и нормализуем данные
+                cleaned_df = df.copy()
+                
+                # Переименовываем проблематичные колонки
+                new_columns = []
+                for i, col in enumerate(cleaned_df.columns):
+                    col_str = str(col)
+                    if col_str.startswith('Unnamed:') or col_str.isdigit() or col_str in ['nan', 'None']:
+                        # Даем осмысленные названия
+                        if sheet_name == "a. Детали инициативы":
+                            new_columns.append(f"Поле_{i+1}")
+                        elif sheet_name == "b. Финансовое влияние":
+                            new_columns.append(f"Финансы_{i+1}")
+                        else:
+                            new_columns.append(f"Столбец_{i+1}")
+                    else:
+                        new_columns.append(col_str)
+                
+                cleaned_df.columns = new_columns
+                
+                # Очищаем от пустых значений и преобразуем в строки
+                cleaned_df = cleaned_df.fillna('')
+                for col in cleaned_df.columns:
+                    cleaned_df[col] = cleaned_df[col].astype(str)
+                    cleaned_df[col] = cleaned_df[col].replace('nan', '')
+                    cleaned_df[col] = cleaned_df[col].replace('None', '')
+                    cleaned_df[col] = cleaned_df[col].replace('<NA>', '')
+                
+                # Удаляем полностью пустые строки
+                cleaned_df = cleaned_df.dropna(how='all')
+                
+                # Если данных недостаточно, дополняем базовой структурой
+                if len(cleaned_df) == 0:
+                    if sheet_name == "a. Детали инициативы":
+                        cleaned_df = pd.DataFrame({
+                            "Параметр": ["Название инициативы", "Описание инициативы", "Ответственный за инициативу"],
+                            "Значение": ["", "", ""],
+                            "Комментарий": ["", "", ""]
+                        })
+                    else:
+                        cleaned_df = pd.DataFrame({
+                            "Параметр": [""],
+                            "Значение": [""],
+                            "Комментарий": [""]
+                        })
+                
                 # Сохраняем под несколькими ключами для всех проектов:
                 
                 # 1. Полный ключ для совместимости
                 unique_key = f"{filename}_{sheet_name}"
-                all_data[unique_key] = df.copy()
+                all_data[unique_key] = cleaned_df.copy()
                 
                 # 2. Простое название раздела для прямого доступа
-                all_data[sheet_name] = df.copy()
+                all_data[sheet_name] = cleaned_df.copy()
                 
                 # 3. Ключи с префиксом каждого проекта
                 for project_id in ["business_case_1", "business_case_2", "business_case_3"]:
                     project_section_key = f"{project_id}_{sheet_name}"
-                    all_data[project_section_key] = df.copy()
+                    all_data[project_section_key] = cleaned_df.copy()
             
             st.success(f"✅ Загружен мастер файл: {filename}")
             st.info(f"📊 Загружено разделов: {', '.join(excel_data.keys())}")
@@ -376,15 +422,17 @@ def get_column_config(df):
     column_config = {}
     
     for col in df.columns:
-        # Преобразуем все данные в строки для избежания конфликтов типов
-        # Исключаем колонки с проблематичными названиями
-        if col.lower() in ['столбец', 'column', 'unnamed']:
+        # Пропускаем проблематичные колонки
+        col_str = str(col).lower()
+        if any(x in col_str for x in ['столбец', 'column', 'unnamed', 'nan', 'none']):
             continue
             
+        # Все колонки настраиваем как текстовые для избежания ошибок Arrow
         column_config[col] = st.column_config.TextColumn(
             col,
             help=f"Поле: {col}",
             max_chars=1000,
+            width=None,  # Автоматическая ширина
         )
     
     return column_config
