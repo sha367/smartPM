@@ -132,8 +132,6 @@ dmypy.json
 .streamlit/
 
 # Project specific
-projects_database.json
-changelog.json
 business_cases_backup.xlsx
 *.xlsx
 *.xls
