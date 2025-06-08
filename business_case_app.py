@@ -1,732 +1,672 @@
 import streamlit as st
 import pandas as pd
-import json
-import os
-from datetime import datetime, timedelta
-import uuid
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import tempfile
-import shutil
 import numpy as np
-from pathlib import Path
-import openpyxl
+from datetime import datetime, date
+import os
+import json
+import uuid
 
 # Конфигурация страницы
 st.set_page_config(
-    page_title="SmartPM | L0-L5 Project Management",
-    page_icon="🎯",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_title="Управление бизнес-кейсами",
+    page_icon="💼",
+    layout="wide"
 )
 
-# Глобальные переменные
-EXCEL_FILES = {
-    "mikhailenko": {
-        "name": "Династия Врачей - Увеличение выручки", 
-        "file": "Бизнес_кейс_Михненко_Екатерина.xlsx",
-        "level": "L3",
-        "owner": "Екатерина Михайленко",
-        "description": "Увеличение выручки сети медицинских клиник через цифровизацию процессов"
+# Новые Excel файлы
+EXCEL_FILES = [
+    "Бизнес_кейс_Михненко_Екатерина.xlsx",
+    "Бизнес_кейс_Зырянова.xlsx",
+    "Бизнес_кейс. Руслан Амерханов.xlsx"
+]
+PROJECTS_FILE = "projects_database.json"
+CHANGELOG_FILE = "changelog.json"
+
+# L-статусы с описаниями
+L_STATUSES = {
+    "L0": {"name": "Идея", "description": "Сбор всех идей, независимо от реализуемости или масштаба"},
+    "L1": {"name": "Идентифицировано", "description": "Инициатива признана перспективной, проводится первичная оценка и уточнение"},
+    "L2": {"name": "Планирование", "description": "Разработка подробного бизнес-кейса, утверждение инициативы"},
+    "L3": {"name": "Исполнение", "description": "Реализация инициативы по утвержденному плану, выполнение ключевых мероприятий"},
+    "L4": {"name": "Завершено", "description": "Все шаги по реализации завершены, идет проверка достижения целевых показателей"},
+    "L5": {"name": "Реализовано", "description": "Фактическая ценность подтверждена в бизнес-результатах"}
+}
+
+# Проекты с информацией
+PROJECTS_INFO = {
+    "business_case_1": {
+        "name": "Династия Врачей - Увеличение выручки",
+        "owner": "Екатерина Михайленко", 
+        "description": "Увеличение выручки сети медицинских клиник через цифровизацию процессов",
+        "status": "L3",
+        "file": "Бизнес_кейс_Михненко_Екатерина.xlsx"
     },
-    "zyryanova": {
+    "business_case_2": {
         "name": "КЭВ - Конверсия клиентов",
-        "file": "Бизнес_кейс_Зырянова.xlsx", 
-        "level": "L2",
         "owner": "Зырянова",
-        "description": "Повышение конверсии клиентов в компании КЭВ через оптимизацию процессов"
+        "description": "Повышение конверсии клиентов в компании КЭВ через оптимизацию процессов", 
+        "status": "L2",
+        "file": "Бизнес_кейс_Зырянова.xlsx"
     },
-    "amerkhanov": {
+    "business_case_3": {
         "name": "Lead to Appointment - Конверсия",
-        "file": "Бизнес_кейс. Руслан Амерханов.xlsx",
-        "level": "L4", 
         "owner": "Руслан Амерханов",
-        "description": "Увеличение конверсии лидов в записи на приемы"
+        "description": "Увеличение конверсии лидов в записи на приемы",
+        "status": "L4", 
+        "file": "Бизнес_кейс. Руслан Амерханов.xlsx"
     }
 }
 
-SECTION_NAMES = {
-    "a. Детали инициативы": {
-        "icon": "📋",
-        "description": "Основная информация об инициативе"
-    },
-    "b. Финансовое влияние": {
-        "icon": "💰", 
-        "description": "Финансовые показатели и прогнозы"
-    },
-    "c. Поддерживающие расчеты": {
-        "icon": "📊",
-        "description": "Расчеты и аналитика"
-    },
-    "d. Диаграмма Ганта": {
-        "icon": "📅",
-        "description": "Временной план проекта"
-    },
-    "e. Мониторинг эффекта": {
-        "icon": "📈",
-        "description": "Отслеживание результатов"
-    },
-    "f. Статус инициатив": {
-        "icon": "⚡",
-        "description": "Текущий статус проекта"
-    }
-}
+# Инициализация состояния
+if 'current_view' not in st.session_state:
+    st.session_state.current_view = "projects_list"  # projects_list, project_detail, new_project, changelog
 
-# CSS стили для L0-L5 дизайна
-st.markdown("""
-<style>
-    .main-header {
-        background: linear-gradient(90deg, #1e3a8a 0%, #3b82f6 100%);
-        padding: 2rem;
-        border-radius: 10px;
-        color: white;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    
-    .level-card {
-        background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
-        padding: 1.5rem;
-        border-radius: 12px;
-        border-left: 5px solid #3b82f6;
-        margin: 1rem 0;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    }
-    
-    .level-header {
-        font-size: 1.2rem;
-        font-weight: bold;
-        color: #1e40af;
-        margin-bottom: 0.5rem;
-    }
-    
-    .project-metric {
-        background: white;
-        padding: 1rem;
-        border-radius: 8px;
-        text-align: center;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    
-    .wave-header {
-        background: linear-gradient(45deg, #0f172a, #1e293b);
-        color: white;
-        padding: 1rem;
-        border-radius: 8px;
-        margin-bottom: 1rem;
-    }
-    
-    .status-indicator {
-        display: inline-block;
-        width: 12px;
-        height: 12px;
-        border-radius: 50%;
-        margin-right: 8px;
-    }
-    
-    .status-on-track { background-color: #10b981; }
-    .status-at-risk { background-color: #f59e0b; }
-    .status-delayed { background-color: #ef4444; }
-</style>
-""", unsafe_allow_html=True)
+if 'selected_project' not in st.session_state:
+    st.session_state.selected_project = None
 
-# Функции загрузки данных
+if 'selected_section' not in st.session_state:
+    st.session_state.selected_section = None
+
+if 'projects_database' not in st.session_state:
+    st.session_state.projects_database = {}
+
+if 'changelog' not in st.session_state:
+    st.session_state.changelog = []
+
+def generate_sample_status_data():
+    """Генерируем тестовые данные для статусов инициатив"""
+    status_data = pd.DataFrame({
+        "Инициатива": [
+            "Династия Врачей - Увеличение выручки",
+            "КЭВ - Конверсия клиентов", 
+            "Lead to Appointment - Конверсия"
+        ],
+        "Статус": ["L3", "L2", "L4"],
+        "Владелец": [
+            "Екатерина Михайленко",
+            "Зырянова", 
+            "Руслан Амерханов"
+        ],
+        "Прогресс (%)": [75, 45, 90],
+        "Плановый эффект (млн руб)": [35, 120, 35],
+        "Фактический эффект (млн руб)": [28, 0, 30],
+        "Дата начала": [
+            "2024-01-15", "2024-03-01", "2024-02-01"
+        ],
+        "Планируемое завершение": [
+            "2024-12-31", "2025-01-31", "2024-11-30"
+        ],
+        "Ключевые вехи": [
+            "Цифровизация процессов, увеличение доходимости",
+            "Анализ КЭВ, усиление процессов",
+            "Ролевки, обучение менеджеров"
+        ],
+        "Риски": [
+            "Сопротивление изменениям",
+            "Сложность процессов",
+            "Высокая текучесть кадров"
+        ],
+        "Комментарии": [
+            "Результаты превышают ожидания",
+            "Требуется дополнительный анализ",
+            "Обучение в процессе"
+        ]
+    })
+    return status_data
+
 @st.cache_data
-def load_business_case_data(business_case_id):
-    """Загружаем данные бизнес-кейса из Excel файла"""
-    try:
-        if business_case_id not in EXCEL_FILES:
-            return None
-            
-        file_path = EXCEL_FILES[business_case_id]["file"]
-        
-        # Проверяем существование файла
-        if not os.path.exists(file_path):
-            st.error(f"❌ Файл не найден: {file_path}")
-            return None
-        
-        # Загружаем все листы
-        excel_data = pd.read_excel(file_path, sheet_name=None, engine='openpyxl')
-        
-        # Очищаем данные
-        cleaned_data = {}
-        for sheet_name, df in excel_data.items():
-            cleaned_df = clean_dataframe(df)
-            if not cleaned_df.empty:
-                cleaned_data[sheet_name] = cleaned_df
-        
-        return {
-            "info": EXCEL_FILES[business_case_id],
-            "data": cleaned_data
-        }
-        
-    except Exception as e:
-        st.error(f"❌ Ошибка загрузки {file_path}: {e}")
-        return None
-
-def clean_dataframe(df):
-    """Очищаем и нормализуем DataFrame"""
-    if df.empty:
-        return df
+def load_excel_data():
+    """Загружаем все листы из Excel файлов"""
+    all_data = {}
     
-    # Создаем копию для безопасности
-    cleaned_df = df.copy()
-    
-    # 1. Удаляем полностью пустые строки и столбцы
-    cleaned_df = cleaned_df.dropna(how='all').dropna(axis=1, how='all')
-    
-    # 2. Переименовываем проблематичные колонки
-    new_columns = []
-    for i, col in enumerate(cleaned_df.columns):
-        col_str = str(col)
-        if col_str.startswith('Unnamed:') or col_str.isdigit() or col_str.strip() == '' or col_str == 'nan':
-            new_columns.append(f"Столбец_{i+1}")
-        else:
-            new_columns.append(col_str)
-    
-    cleaned_df.columns = new_columns
-    
-    # 3. Заменяем NaN и проблемные значения на пустые строки
-    cleaned_df = cleaned_df.fillna('')
-    
-    # 4. Преобразуем все в строки для совместимости с data_editor
-    for col in cleaned_df.columns:
+    for excel_file in EXCEL_FILES:
         try:
-            cleaned_df[col] = cleaned_df[col].astype(str)
-            cleaned_df[col] = cleaned_df[col].replace(['nan', 'None', '<NA>', 'NaT'], '')
-        except Exception:
-            # Если преобразование не удалось, заполняем пустыми строками
-            cleaned_df[col] = ''
+            if os.path.exists(excel_file):
+                excel_data = pd.read_excel(excel_file, sheet_name=None, engine='openpyxl')
+                filename = os.path.basename(excel_file).replace('.xlsx', '')
+                
+                # Определяем project_id по файлу
+                if "Михненко" in excel_file:
+                    project_id = "business_case_1"
+                elif "Зырянова" in excel_file:
+                    project_id = "business_case_2"
+                elif "Амерханов" in excel_file:
+                    project_id = "business_case_3"
+                else:
+                    project_id = f"project_{len(all_data) + 1}"
+                
+                for sheet_name, df in excel_data.items():
+                    # Очищаем и нормализуем данные
+                    cleaned_df = df.copy()
+                    
+                    # Удаляем полностью пустые строки и столбцы
+                    cleaned_df = cleaned_df.dropna(how='all').dropna(axis=1, how='all')
+                    
+                    # Переименовываем проблематичные колонки
+                    new_columns = []
+                    for i, col in enumerate(cleaned_df.columns):
+                        col_str = str(col)
+                        if col_str.startswith('Unnamed:') or col_str.isdigit() or col_str in ['nan', 'None'] or col_str.strip() == '':
+                            # Даем осмысленные названия
+                            if sheet_name == "a. Детали инициативы":
+                                new_columns.append(f"Поле_{i+1}")
+                            elif sheet_name == "b. Финансовое влияние":
+                                new_columns.append(f"Финансы_{i+1}")
+                            else:
+                                new_columns.append(f"Столбец_{i+1}")
+                        else:
+                            new_columns.append(col_str)
+                    
+                    cleaned_df.columns = new_columns
+                    
+                    # Очищаем от пустых значений и преобразуем в строки
+                    cleaned_df = cleaned_df.fillna('')
+                    for col in cleaned_df.columns:
+                        try:
+                            cleaned_df[col] = cleaned_df[col].astype(str)
+                            cleaned_df[col] = cleaned_df[col].replace('nan', '')
+                            cleaned_df[col] = cleaned_df[col].replace('None', '')
+                            cleaned_df[col] = cleaned_df[col].replace('<NA>', '')
+                        except:
+                            cleaned_df[col] = ''
+                    
+                    # Удаляем строки где все значения пустые
+                    mask = cleaned_df.apply(lambda row: all(str(val).strip() == '' for val in row), axis=1)
+                    cleaned_df = cleaned_df[~mask]
+                    
+                    # Если данных недостаточно, дополняем базовой структурой
+                    if len(cleaned_df) == 0:
+                        if sheet_name == "a. Детали инициативы":
+                            cleaned_df = pd.DataFrame({
+                                "Параметр": ["Название инициативы", "Описание инициативы", "Ответственный за инициативу"],
+                                "Значение": ["", "", ""],
+                                "Комментарий": ["", "", ""]
+                            })
+                        else:
+                            cleaned_df = pd.DataFrame({
+                                "Параметр": [""],
+                                "Значение": [""],
+                                "Комментарий": [""]
+                            })
+                    
+                    # Сохраняем данные с ключом проекта и раздела
+                    section_key = f"{project_id}_{sheet_name}"
+                    all_data[section_key] = cleaned_df.copy()
+                    
+                    # Также сохраняем под простым названием раздела для обратной совместимости
+                    all_data[sheet_name] = cleaned_df.copy()
+                
+                st.success(f"✅ Загружен файл: {filename}")
+                
+        except Exception as e:
+            st.error(f"❌ Не удалось загрузить файл {excel_file}: {e}")
+            continue
     
-    # 5. Удаляем строки где все значения пустые
-    mask = cleaned_df.apply(lambda row: all(str(val).strip() == '' for val in row), axis=1)
-    cleaned_df = cleaned_df[~mask]
+    # Если ничего не загрузилось, создаем пустые данные
+    if not all_data:
+        default_sections = [
+            "a. Детали инициативы",
+            "b. Финансовое влияние", 
+            "c. Поддерживающие расчеты",
+            "d. Диаграмма Ганта",
+            "e. Мониторинг эффекта",
+            "f. Статус инициатив"
+        ]
+        
+        for section in default_sections:
+            empty_df = pd.DataFrame({
+                "Параметр": ["Данные не загружены"],
+                "Значение": ["Проверьте наличие Excel файлов"],
+                "Комментарий": [""]
+            })
+            all_data[section] = empty_df
     
-    return cleaned_df
+    return all_data
 
-def get_project_level_color(level):
-    """Возвращает цвет для уровня проекта"""
-    colors = {
-        "L0": "#dc2626",  # Красный
-        "L1": "#ea580c",  # Оранжевый  
-        "L2": "#ca8a04",  # Желтый
-        "L3": "#16a34a",  # Зеленый
-        "L4": "#2563eb",  # Синий
-        "L5": "#7c3aed"   # Фиолетовый
+def load_changelog():
+    """Загружаем журнал изменений"""
+    try:
+        if os.path.exists(CHANGELOG_FILE):
+            with open(CHANGELOG_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return []
+    except:
+        return []
+
+def save_changelog(changelog):
+    """Сохраняем журнал изменений"""
+    try:
+        with open(CHANGELOG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(changelog, f, ensure_ascii=False, indent=2)
+        return True
+    except:
+        return False
+
+def add_changelog_entry(project_id, action, details, user="Текущий пользователь"):
+    """Добавляем запись в журнал изменений"""
+    entry = {
+        "timestamp": datetime.now().isoformat(),
+        "project_id": project_id,
+        "user": user,
+        "action": action,
+        "details": details
     }
-    return colors.get(level, "#6b7280")
+    
+    changelog = load_changelog()
+    changelog.append(entry)
+    save_changelog(changelog)
+    
+    # Обновляем состояние
+    st.session_state.changelog = changelog
 
-def create_wave_dashboard():
-    """Создаем главную дашборд в стиле McKinsey Wave"""
+def load_projects_database():
+    """Загружаем базу проектов"""
+    try:
+        if os.path.exists(PROJECTS_FILE):
+            with open(PROJECTS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        else:
+            # Создаем начальную базу из PROJECTS_INFO
+            return PROJECTS_INFO.copy()
+    except:
+        return PROJECTS_INFO.copy()
+
+def save_projects_database(projects_db):
+    """Сохраняем базу проектов"""
+    try:
+        with open(PROJECTS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(projects_db, f, ensure_ascii=False, indent=2)
+        return True
+    except:
+        return False
+
+def get_project_info():
+    """Получаем информацию о проектах"""
+    return load_projects_database()
+
+def create_new_project(project_data):
+    """Создаем новый проект"""
+    projects_db = load_projects_database()
     
-    # Заголовок
-    st.markdown("""
-    <div class="main-header">
-        <h1>🎯 SmartPM | McKinsey Wave Style</h1>
-        <p>Система управления проектами L0-L5 • Российские бизнес-кейсы</p>
-    </div>
-    """, unsafe_allow_html=True)
+    # Генерируем новый ID
+    new_id = f"business_case_{len(projects_db) + 1}"
     
-    # Загружаем данные всех проектов
-    all_projects_data = {}
-    for project_id in EXCEL_FILES.keys():
-        data = load_business_case_data(project_id)
-        if data:
-            all_projects_data[project_id] = data
+    # Добавляем проект
+    projects_db[new_id] = project_data
     
-    if not all_projects_data:
-        st.warning("⚠️ Нет данных для отображения")
-        return
+    # Сохраняем
+    if save_projects_database(projects_db):
+        st.session_state.projects_database = projects_db
+        add_changelog_entry(new_id, "Создание проекта", f"Создан новый проект: {project_data['name']}")
+        return new_id
+    return None
+
+def get_column_config(df):
+    """Создаем конфигурацию колонок для data_editor"""
+    config = {}
+    for col in df.columns:
+        config[col] = st.column_config.TextColumn(
+            col,
+            help=f"Редактируемое поле: {col}",
+            max_chars=500,
+            width="medium"
+        )
+    return config
+
+def save_excel_data(data_dict):
+    """Сохраняем изменения обратно в Excel (заглушка)"""
+    # В реальной реализации здесь можно сохранять в Excel
+    st.success("✅ Изменения сохранены в памяти")
+    return True
+
+def show_l_status_info():
+    """Показываем информацию о L-статусах"""
+    st.markdown("### 📊 L-статусы проектов")
     
-    # Основные метрики
+    for status, info in L_STATUSES.items():
+        with st.expander(f"{status}: {info['name']}"):
+            st.write(info['description'])
+
+def show_projects_list():
+    """Показываем список всех проектов"""
+    st.title("💼 Управление бизнес-кейсами")
+    st.markdown("---")
+    
+    # Кнопки навигации
     col1, col2, col3, col4 = st.columns(4)
-    
     with col1:
-        st.markdown("""
-        <div class="project-metric">
-            <h3 style="color: #1e40af; margin: 0;">Всего проектов</h3>
-            <h2 style="color: #1f2937; margin: 0;">{}</h2>
-        </div>
-        """.format(len(all_projects_data)), unsafe_allow_html=True)
+        if st.button("📝 Новый проект"):
+            st.session_state.current_view = "new_project"
+            st.rerun()
     
     with col2:
-        # Считаем общий финансовый эффект 2025
-        total_effect_2025 = 0
-        for project_data in all_projects_data.values():
-            finance_data = project_data["data"].get("b. Финансовое влияние", pd.DataFrame())
-            if not finance_data.empty and "2025" in finance_data.columns:
-                try:
-                    effect = float(finance_data["2025"].iloc[0]) if len(finance_data) > 0 else 0
-                    total_effect_2025 += effect
-                except:
-                    pass
-        
-        st.markdown("""
-        <div class="project-metric">
-            <h3 style="color: #059669; margin: 0;">Эффект 2025</h3>
-            <h2 style="color: #1f2937; margin: 0;">{:.0f} млн ₽</h2>
-        </div>
-        """.format(total_effect_2025), unsafe_allow_html=True)
+        if st.button("📊 Статистика"):
+            st.session_state.current_view = "analytics"
+            st.rerun()
     
     with col3:
-        # Активные проекты (все загруженные считаем активными)
-        active_projects = len([p for p in all_projects_data.values() if p])
-        st.markdown("""
-        <div class="project-metric">
-            <h3 style="color: #7c3aed; margin: 0;">Активных проектов</h3>
-            <h2 style="color: #1f2937; margin: 0;">{}</h2>
-        </div>
-        """.format(active_projects), unsafe_allow_html=True)
+        if st.button("📋 Журнал изменений"):
+            st.session_state.current_view = "changelog"
+            st.rerun()
     
     with col4:
-        # Средний уровень проектов
-        levels = [info["level"] for info in EXCEL_FILES.values()]
-        avg_level = sum([int(l[1:]) for l in levels]) / len(levels) if levels else 0
-        st.markdown("""
-        <div class="project-metric">
-            <h3 style="color: #dc2626; margin: 0;">Средний уровень</h3>
-            <h2 style="color: #1f2937; margin: 0;">L{:.1f}</h2>
-        </div>
-        """.format(avg_level), unsafe_allow_html=True)
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # Проекты по уровням L0-L5
-    st.markdown("""
-    <div class="wave-header">
-        <h2 style="margin: 0;">📊 Портфель проектов по уровням L0-L5</h2>
-        <p style="margin: 0.5rem 0 0 0;">Распределение проектов по уровням зрелости McKinsey Wave</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Группируем проекты по уровням
-    projects_by_level = {}
-    for project_id, project_info in EXCEL_FILES.items():
-        level = project_info["level"]
-        if level not in projects_by_level:
-            projects_by_level[level] = []
-        projects_by_level[level].append((project_id, project_info))
-    
-    # Отображаем проекты по уровням
-    for level in ["L0", "L1", "L2", "L3", "L4", "L5"]:
-        if level in projects_by_level:
-            projects = projects_by_level[level]
-            color = get_project_level_color(level)
-            
-            st.markdown(f"""
-            <div class="level-card" style="border-left-color: {color};">
-                <div class="level-header" style="color: {color};">
-                    {level} • {len(projects)} проект(ов)
-                </div>
-            """, unsafe_allow_html=True)
-            
-            for project_id, project_info in projects:
-                project_data = all_projects_data.get(project_id)
-                status = "✅ Загружен" if project_data else "❌ Ошибка"
-                status_class = "status-on-track" if project_data else "status-delayed"
-                
-                # Получаем финансовый эффект
-                financial_effect = 0
-                if project_data:
-                    finance_data = project_data["data"].get("b. Финансовое влияние", pd.DataFrame())
-                    if not finance_data.empty and "2025" in finance_data.columns:
-                        try:
-                            financial_effect = float(finance_data["2025"].iloc[0]) if len(finance_data) > 0 else 0
-                        except:
-                            pass
-                
-                col1, col2, col3 = st.columns([3, 1, 1])
-                with col1:
-                    st.markdown(f"""
-                    <span class="status-indicator {status_class}"></span>
-                    <strong>{project_info['name']}</strong><br>
-                    <small style="color: #6b7280;">{project_info['description'][:100]}...</small>
-                    """, unsafe_allow_html=True)
-                
-                with col2:
-                    st.markdown(f"""
-                    <div style="text-align: center;">
-                        <strong style="color: {color};">{financial_effect:.0f} млн ₽</strong><br>
-                        <small style="color: #6b7280;">Эффект 2025</small>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                with col3:
-                    if st.button(f"📋 Детали", key=f"view_{project_id}"):
-                        st.session_state.selected_project = project_id
-                        st.session_state.page = "project_details"
-                        st.rerun()
-            
-            st.markdown("</div>", unsafe_allow_html=True)
-        else:
-            # Пустой уровень
-            color = get_project_level_color(level)
-            st.markdown(f"""
-            <div class="level-card" style="border-left-color: {color}; opacity: 0.5;">
-                <div class="level-header" style="color: {color};">
-                    {level} • 0 проектов
-                </div>
-                <p style="color: #6b7280; margin: 0;">Нет проектов данного уровня</p>
-            </div>
-            """, unsafe_allow_html=True)
-    
-    # График распределения по уровням
-    st.markdown("<br>", unsafe_allow_html=True)
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Круговая диаграмма по уровням
-        level_counts = {}
-        for project_info in EXCEL_FILES.values():
-            level = project_info["level"]
-            level_counts[level] = level_counts.get(level, 0) + 1
-        
-        fig_pie = px.pie(
-            values=list(level_counts.values()),
-            names=list(level_counts.keys()),
-            title="🎯 Распределение проектов по уровням",
-            color_discrete_map={level: get_project_level_color(level) for level in level_counts.keys()}
-        )
-        st.plotly_chart(fig_pie, use_container_width=True)
-    
-    with col2:
-        # Финансовый эффект по проектам
-        chart_data = []
-        for project_id, project_info in EXCEL_FILES.items():
-            project_data = all_projects_data.get(project_id)
-            if project_data:
-                finance_data = project_data["data"].get("b. Финансовое влияние", pd.DataFrame())
-                if not finance_data.empty and "2025" in finance_data.columns:
-                    try:
-                        effect = float(finance_data["2025"].iloc[0]) if len(finance_data) > 0 else 0
-                        chart_data.append({
-                            "Проект": project_info["name"][:20] + "...",
-                            "Эффект": effect,
-                            "Уровень": project_info["level"]
-                        })
-                    except:
-                        pass
-        
-        if chart_data:
-            chart_df = pd.DataFrame(chart_data)
-            fig_bar = px.bar(
-                chart_df, 
-                x="Эффект", 
-                y="Проект",
-                color="Уровень",
-                title="💰 Финансовый эффект 2025",
-                color_discrete_map={level: get_project_level_color(level) for level in chart_df["Уровень"].unique()}
-            )
-            fig_bar.update_layout(yaxis={'categoryorder': 'total ascending'})
-            st.plotly_chart(fig_bar, use_container_width=True)
-
-def show_project_details(project_id):
-    """Показываем детали конкретного проекта"""
-    if project_id not in EXCEL_FILES:
-        st.error("❌ Проект не найден")
-        return
-    
-    project_info = EXCEL_FILES[project_id]
-    project_data = load_business_case_data(project_id)
-    
-    if not project_data:
-        st.error("❌ Не удалось загрузить данные проекта")
-        return
-    
-    # Заголовок проекта
-    level_color = get_project_level_color(project_info["level"])
-    st.markdown(f"""
-    <div class="wave-header">
-        <h1 style="margin: 0;">
-            <span style="background: {level_color}; color: white; padding: 0.3rem 0.8rem; border-radius: 20px; font-size: 0.8rem;">
-                {project_info["level"]}
-            </span>
-            {project_info["name"]}
-        </h1>
-        <p style="margin: 0.5rem 0 0 0;">{project_info["description"]}</p>
-        <p style="margin: 0.2rem 0 0 0; opacity: 0.8;">👤 Владелец: {project_info["owner"]}</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Разделы проекта
-    sections = {
-        "a. Детали инициативы": {"icon": "📋", "description": "Основная информация о проекте"},
-        "b. Финансовое влияние": {"icon": "💰", "description": "Финансовые показатели и ROI"},
-        "c. Поддерживающие расчеты": {"icon": "🧮", "description": "Детальные расчеты и обоснования"},
-        "d. Диаграмма Ганта": {"icon": "📅", "description": "Временные рамки и этапы проекта"},
-        "e. Мониторинг эффекта": {"icon": "📈", "description": "Отслеживание результатов"},
-        "f. Статус инициатив": {"icon": "🎯", "description": "Текущий статус и прогресс"}
-    }
-    
-    # Табы для разделов
-    tabs = st.tabs([f"{info['icon']} {key}" for key, info in sections.items()])
-    
-    for i, (section_key, section_info) in enumerate(sections.items()):
-        with tabs[i]:
-            st.subheader(f"{section_info['icon']} {section_key}")
-            st.caption(section_info['description'])
-            
-            # Получаем данные раздела
-            section_data = project_data["data"].get(section_key, pd.DataFrame())
-            
-            if section_data.empty:
-                st.warning(f"⚠️ Нет данных для раздела '{section_key}'")
-                continue
-            
-            # Специальная обработка для разных разделов
-            if section_key == "d. Диаграмма Ганта":
-                show_gantt_chart(section_data)
-            elif section_key == "e. Мониторинг эффекта":
-                show_monitoring_chart(section_data)
-            elif section_key == "b. Финансовое влияние":
-                show_financial_impact(section_data)
-            else:
-                # Обычный редактор данных
-                if st.button(f"🔄 Обновить данные раздела '{section_key}'", key=f"refresh_{section_key}"):
-                    st.cache_data.clear()
-                    st.rerun()
-                
-                edited_df = st.data_editor(
-                    section_data,
-                    use_container_width=True,
-                    num_rows="dynamic",
-                    key=f"editor_{project_id}_{section_key}"
-                )
-                
-                if st.button(f"💾 Сохранить изменения в '{section_key}'", key=f"save_{section_key}"):
-                    st.success(f"✅ Изменения в разделе '{section_key}' сохранены!")
-
-def show_gantt_chart(gantt_data):
-    """Показываем диаграмму Ганта"""
-    if gantt_data.empty:
-        st.warning("⚠️ Недостаточно данных для построения диаграммы Ганта")
-        st.dataframe(gantt_data, use_container_width=True)
-        return
-    
-    # Показываем таблицу данных
-    st.subheader("📋 Данные проекта")
-    edited_df = st.data_editor(
-        gantt_data,
-        use_container_width=True,
-        num_rows="dynamic"
-    )
-    
-    # Пытаемся построить диаграмму если есть подходящие данные
-    try:
-        if len(gantt_data.columns) >= 3:
-            # Предполагаем что первая колонка - задачи, вторая - начало, третья - конец
-            tasks_col = gantt_data.columns[0]
-            start_col = gantt_data.columns[1] 
-            end_col = gantt_data.columns[2]
-            
-            # Преобразуем даты
-            gantt_copy = gantt_data.copy()
-            gantt_copy[start_col] = pd.to_datetime(gantt_copy[start_col], errors='coerce')
-            gantt_copy[end_col] = pd.to_datetime(gantt_copy[end_col], errors='coerce')
-            
-            # Фильтруем строки с валидными датами
-            valid_rows = gantt_copy.dropna(subset=[start_col, end_col])
-            
-            if not valid_rows.empty:
-                fig = px.timeline(
-                    valid_rows,
-                    x_start=start_col,
-                    x_end=end_col, 
-                    y=tasks_col,
-                    title="📅 Диаграмма Ганта проекта"
-                )
-                fig.update_yaxes(autorange="reversed")
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("ℹ️ Не удалось найти валидные даты для построения диаграммы Ганта")
-        
-    except Exception as e:
-        st.info(f"ℹ️ Диаграмма Ганта недоступна: {e}")
-
-def show_monitoring_chart(monitoring_data):
-    """Показываем график мониторинга"""
-    if monitoring_data.empty:
-        st.warning("⚠️ Нет данных для мониторинга")
-        return
-    
-    st.subheader("📈 График мониторинга")
-    
-    # Очищаем данные от пустых строк и столбцов
-    monitoring_data = monitoring_data.dropna(how='all').dropna(axis=1, how='all')
-    
-    # Показываем таблицу данных
-    if not monitoring_data.empty:
-        # Редактор данных
-        edited_df = st.data_editor(
-            monitoring_data,
-            use_container_width=True,
-            num_rows="dynamic"
-        )
-        
-        # Пытаемся построить график
-        try:
-            if len(monitoring_data.columns) > 1:
-                numeric_cols = []
-                for col in monitoring_data.columns[1:]:
-                    # Проверяем наличие числовых данных
-                    sample_values = monitoring_data[col].dropna().head(5)
-                    has_numeric = False
-                    
-                    for val in sample_values:
-                        try:
-                            float(str(val).replace(',', '.').replace('₽', '').replace('%', '').strip())
-                            has_numeric = True
-                            break
-                        except:
-                            continue
-                    
-                    if has_numeric:
-                        numeric_cols.append(col)
-                
-                if numeric_cols:
-                    fig = go.Figure()
-                    x_values = monitoring_data[monitoring_data.columns[0]].tolist()
-                    
-                    for col in numeric_cols:
-                        y_values = []
-                        for val in monitoring_data[col]:
-                            try:
-                                clean_val = str(val).replace(',', '.').replace('₽', '').replace('%', '').strip()
-                                y_values.append(float(clean_val))
-                            except:
-                                y_values.append(0)
-                        
-                        fig.add_trace(go.Scatter(
-                            x=x_values,
-                            y=y_values,
-                            mode='lines+markers',
-                            name=col,
-                            line=dict(width=3),
-                            marker=dict(size=8)
-                        ))
-                    
-                    fig.update_layout(
-                        title="📈 Динамика показателей мониторинга",
-                        xaxis_title="Период",
-                        yaxis_title="Значение",
-                        template='plotly_white'
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("ℹ️ Нет числовых данных для построения графика")
-            
-        except Exception as e:
-            st.info(f"ℹ️ График мониторинга недоступен: {e}")
-    
-    else:
-        st.warning("⚠️ Нет данных для отображения")
-
-def show_financial_impact(finance_data):
-    """Показываем финансовое влияние с графиками"""
-    if finance_data.empty:
-        st.warning("⚠️ Нет финансовых данных")
-        return
-    
-    # Редактор данных
-    edited_df = st.data_editor(
-        finance_data,
-        use_container_width=True,
-        num_rows="dynamic"
-    )
-    
-    # График по годам
-    if len(finance_data) > 0:
-        years = ["2025", "2026", "2027"]
-        year_data = []
-        
-        for year in years:
-            if year in finance_data.columns:
-                try:
-                    value = float(finance_data[year].iloc[0])
-                    year_data.append({"Год": year, "Эффект (млн ₽)": value})
-                except:
-                    year_data.append({"Год": year, "Эффект (млн ₽)": 0})
-        
-        if year_data:
-            year_df = pd.DataFrame(year_data)
-            fig = px.bar(year_df, x="Год", y="Эффект (млн ₽)", 
-                        title="💰 Финансовый эффект по годам")
-            st.plotly_chart(fig, use_container_width=True)
-
-# Основная функция приложения
-def main():
-    # Боковая панель
-    with st.sidebar:
-        st.markdown("""
-        <div style="text-align: center; padding: 1rem; background: linear-gradient(45deg, #1e3a8a, #3b82f6); border-radius: 10px; color: white; margin-bottom: 1rem;">
-            <h2 style="margin: 0;">🎯 SmartPM</h2>
-            <p style="margin: 0;">McKinsey Wave Style</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Навигация
-        page = st.selectbox(
-            "📋 Навигация",
-            ["🏠 Главная дашборд", "🎯 Детали проекта"],
-            key="main_nav"
-        )
-        
-        if page == "🎯 Детали проекта":
-            if EXCEL_FILES:
-                st.subheader("Выберите проект:")
-                project_options = {
-                    f"{info['level']} • {info['name']}": project_id 
-                    for project_id, info in EXCEL_FILES.items()
-                }
-                
-                selected_project_display = st.selectbox(
-                    "Проект:",
-                    options=list(project_options.keys()),
-                    key="project_selector"
-                )
-                
-                selected_project = project_options[selected_project_display]
-            else:
-                st.warning("⚠️ Нет доступных проектов")
-                selected_project = None
-        else:
-            selected_project = None
-        
-        # Информация о системе
-        st.markdown("---")
-        st.markdown("### ℹ️ Система")
-        
-        # Статистика по уровням
-        level_stats = {}
-        for info in EXCEL_FILES.values():
-            level = info["level"]
-            level_stats[level] = level_stats.get(level, 0) + 1
-        
-        for level in ["L0", "L1", "L2", "L3", "L4", "L5"]:
-            count = level_stats.get(level, 0)
-            color = get_project_level_color(level)
-            st.markdown(f"""
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.2rem 0;">
-                <span style="color: {color}; font-weight: bold;">{level}</span>
-                <span>{count} проект(ов)</span>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown(f"**Последнее обновление:** {datetime.now().strftime('%d.%m.%Y %H:%M')}")
-        
-        # Кнопка обновления
         if st.button("🔄 Обновить данные"):
             st.cache_data.clear()
             st.rerun()
     
-    # Основное содержимое
-    if page == "🏠 Главная дашборд":
-        create_wave_dashboard()
-    elif page == "🎯 Детали проекта" and selected_project:
-        show_project_details(selected_project)
+    # Загружаем проекты
+    projects_db = get_project_info()
+    
+    if not projects_db:
+        st.warning("📭 Нет созданных проектов")
+        return
+    
+    # Группируем проекты по L-статусам
+    st.markdown("### 📊 Проекты по L-статусам")
+    
+    # Создаем вкладки для каждого L-статуса
+    status_tabs = st.tabs([f"{status}: {info['name']}" for status, info in L_STATUSES.items()])
+    
+    for i, (status, status_info) in enumerate(L_STATUSES.items()):
+        with status_tabs[i]:
+            st.markdown(f"**{status_info['description']}**")
+            
+            # Фильтруем проекты по статусу
+            status_projects = {k: v for k, v in projects_db.items() if v.get('status') == status}
+            
+            if status_projects:
+                for project_id, project_info in status_projects.items():
+                    with st.container():
+                        col1, col2, col3 = st.columns([3, 1, 1])
+                        
+                        with col1:
+                            st.markdown(f"**{project_info['name']}**")
+                            st.caption(f"👤 {project_info['owner']}")
+                            st.caption(project_info['description'])
+                        
+                        with col2:
+                            status_color = {
+                                "L0": "🔴", "L1": "🟠", "L2": "🟡",
+                                "L3": "🟢", "L4": "🔵", "L5": "🟣"
+                            }
+                            st.markdown(f"### {status_color.get(status, '⚪')} {status}")
+                        
+                        with col3:
+                            if st.button("📋 Открыть", key=f"open_{project_id}"):
+                                st.session_state.selected_project = project_id
+                                st.session_state.current_view = "project_detail"
+                                st.rerun()
+                        
+                        st.markdown("---")
+            else:
+                st.info(f"📭 Нет проектов со статусом {status}")
+    
+    # Показываем сводную информацию
+    st.markdown("### 📈 Сводная информация")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Всего проектов", len(projects_db))
+    
+    with col2:
+        active_projects = len([p for p in projects_db.values() if p.get('status') in ['L1', 'L2', 'L3']])
+        st.metric("Активных проектов", active_projects)
+    
+    with col3:
+        completed_projects = len([p for p in projects_db.values() if p.get('status') in ['L4', 'L5']])
+        st.metric("Завершенных проектов", completed_projects)
+
+def show_new_project_form():
+    """Форма создания нового проекта"""
+    st.title("📝 Создание нового проекта")
+    
+    if st.button("⬅️ Назад к списку"):
+        st.session_state.current_view = "projects_list"
+        st.rerun()
+    
+    st.markdown("---")
+    
+    with st.form("new_project_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            name = st.text_input("📋 Название проекта *")
+            owner = st.text_input("👤 Владелец проекта *")
+            status = st.selectbox("📊 L-статус", options=list(L_STATUSES.keys()),
+                                format_func=lambda x: f"{x}: {L_STATUSES[x]['name']}")
+        
+        with col2:
+            description = st.text_area("📝 Описание проекта *", height=100)
+            file_option = st.selectbox("📁 Excel файл", ["Создать новый"] + EXCEL_FILES)
+            
+        submitted = st.form_submit_button("✅ Создать проект", type="primary")
+        
+        if submitted:
+            if not name or not owner or not description:
+                st.error("❌ Заполните все обязательные поля")
+            else:
+                project_data = {
+                    "name": name,
+                    "owner": owner,
+                    "description": description,
+                    "status": status,
+                    "file": file_option if file_option != "Создать новый" else None,
+                    "created_date": datetime.now().isoformat(),
+                    "updated_date": datetime.now().isoformat()
+                }
+                
+                new_id = create_new_project(project_data)
+                if new_id:
+                    st.success(f"✅ Проект создан с ID: {new_id}")
+                    st.session_state.selected_project = new_id
+                    st.session_state.current_view = "project_detail"
+                    st.rerun()
+                else:
+                    st.error("❌ Ошибка при создании проекта")
+
+def show_project_detail():
+    """Показываем детали проекта"""
+    if not st.session_state.selected_project:
+        st.error("❌ Проект не выбран")
+        return
+    
+    project_id = st.session_state.selected_project
+    projects_db = get_project_info()
+    
+    if project_id not in projects_db:
+        st.error("❌ Проект не найден")
+        return
+    
+    project_info = projects_db[project_id]
+    
+    # Заголовок
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.title(f"🎯 {project_info['name']}")
+        st.caption(f"👤 Владелец: {project_info['owner']}")
+    
+    with col2:
+        if st.button("⬅️ К списку проектов"):
+            st.session_state.current_view = "projects_list"
+            st.rerun()
+    
+    # Информация о проекте
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        status = project_info.get('status', 'L0')
+        status_color = {
+            "L0": "🔴", "L1": "🟠", "L2": "🟡",
+            "L3": "🟢", "L4": "🔵", "L5": "🟣"
+        }
+        st.markdown(f"**Статус:** {status_color.get(status, '⚪')} {status} - {L_STATUSES[status]['name']}")
+    
+    with col2:
+        if 'created_date' in project_info:
+            created = datetime.fromisoformat(project_info['created_date']).strftime("%d.%m.%Y")
+            st.markdown(f"**Создан:** {created}")
+    
+    with col3:
+        if 'updated_date' in project_info:
+            updated = datetime.fromisoformat(project_info['updated_date']).strftime("%d.%m.%Y")
+            st.markdown(f"**Обновлен:** {updated}")
+    
+    st.markdown(f"**Описание:** {project_info['description']}")
+    st.markdown("---")
+    
+    # Загружаем данные
+    data_dict = load_excel_data()
+    
+    # Разделы проекта
+    sections = [
+        ("a. Детали инициативы", "📋 Основная информация о проекте"),
+        ("b. Финансовое влияние", "💰 Финансовые показатели и ROI"),
+        ("c. Поддерживающие расчеты", "🧮 Детальные расчеты"),
+        ("d. Диаграмма Ганта", "📅 Временные рамки проекта"),
+        ("e. Мониторинг эффекта", "📈 Отслеживание результатов"),
+        ("f. Статус инициатив", "🎯 Текущий статус")
+    ]
+    
+    # Создаем вкладки для разделов
+    section_tabs = st.tabs([f"{section[0]}" for section in sections])
+    
+    for i, (section_name, section_desc) in enumerate(sections):
+        with section_tabs[i]:
+            show_section_data(section_name, section_desc, project_id, data_dict)
+
+def show_section_data(section_name, section_description, project_id, data_dict):
+    """Показываем данные раздела с возможностью редактирования"""
+    st.subheader(section_description)
+    
+    # Ищем данные для этого раздела и проекта
+    section_key = f"{project_id}_{section_name}"
+    
+    if section_key in data_dict:
+        df = data_dict[section_key].copy()
+    elif section_name in data_dict:
+        df = data_dict[section_name].copy()
     else:
-        st.info("👈 Выберите страницу в боковой панели")
+        # Создаем пустой DataFrame
+        df = pd.DataFrame({
+            "Параметр": [""],
+            "Значение": [""],
+            "Комментарий": [""]
+        })
+    
+    if df.empty:
+        st.warning(f"⚠️ Данные для раздела '{section_name}' еще не созданы")
+        if st.button(f"➕ Создать данные для '{section_name}'", key=f"create_{section_name}"):
+            # Создаем базовую структуру
+            df = pd.DataFrame({
+                "Параметр": ["Новый параметр"],
+                "Значение": ["Новое значение"],
+                "Комментарий": [""]
+            })
+    
+    # Кнопки управления
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button(f"➕ Добавить строку", key=f"add_row_{section_name}"):
+            new_row = pd.DataFrame({col: [""] for col in df.columns}, index=[len(df)])
+            df = pd.concat([df, new_row], ignore_index=True)
+    
+    with col2:
+        if st.button(f"🔄 Обновить данные", key=f"refresh_{section_name}"):
+            st.cache_data.clear()
+            st.rerun()
+    
+    with col3:
+        if st.button(f"💾 Сохранить изменения", key=f"save_{section_name}"):
+            save_excel_data({section_key: df})
+            add_changelog_entry(project_id, "Изменение данных", f"Обновлен раздел: {section_name}")
+    
+    # Редактор данных
+    if not df.empty:
+        try:
+            edited_df = st.data_editor(
+                df,
+                use_container_width=True,
+                num_rows="dynamic",
+                column_config=get_column_config(df),
+                key=f"editor_{project_id}_{section_name}"
+            )
+            
+            # Показываем количество строк
+            st.caption(f"📊 Строк в таблице: {len(edited_df)}")
+            
+        except Exception as e:
+            st.error(f"❌ Ошибка отображения данных: {e}")
+            st.dataframe(df, use_container_width=True)
+
+def show_changelog():
+    """Показываем журнал изменений"""
+    st.title("📋 Журнал изменений")
+    
+    if st.button("⬅️ Назад к списку"):
+        st.session_state.current_view = "projects_list"
+        st.rerun()
+    
+    changelog = load_changelog()
+    
+    if not changelog:
+        st.info("📭 Журнал изменений пуст")
+        return
+    
+    # Сортируем по дате (новые сверху)
+    changelog_sorted = sorted(changelog, key=lambda x: x['timestamp'], reverse=True)
+    
+    for entry in changelog_sorted:
+        with st.container():
+            col1, col2, col3 = st.columns([2, 1, 1])
+            
+            with col1:
+                st.markdown(f"**{entry['action']}**")
+                st.caption(entry['details'])
+            
+            with col2:
+                timestamp = datetime.fromisoformat(entry['timestamp'])
+                st.caption(f"🕒 {timestamp.strftime('%d.%m.%Y %H:%M')}")
+            
+            with col3:
+                st.caption(f"👤 {entry['user']}")
+                if 'project_id' in entry:
+                    st.caption(f"📁 {entry['project_id']}")
+            
+            st.markdown("---")
+
+def main():
+    """Главная функция приложения"""
+    
+    # Инициализация данных в состоянии
+    if 'projects_database' not in st.session_state or not st.session_state.projects_database:
+        st.session_state.projects_database = get_project_info()
+    
+    if 'changelog' not in st.session_state or not st.session_state.changelog:
+        st.session_state.changelog = load_changelog()
+    
+    # Боковая панель с информацией о L-статусах
+    with st.sidebar:
+        show_l_status_info()
+        
+        st.markdown("---")
+        st.markdown("### ℹ️ Информация о системе")
+        st.markdown(f"**Проектов в системе:** {len(st.session_state.projects_database)}")
+        st.markdown(f"**Записей в журнале:** {len(st.session_state.changelog)}")
+        st.markdown(f"**Последнее обновление:** {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+    
+    # Основное содержимое
+    if st.session_state.current_view == "projects_list":
+        show_projects_list()
+    elif st.session_state.current_view == "project_detail":
+        show_project_detail()
+    elif st.session_state.current_view == "new_project":
+        show_new_project_form()
+    elif st.session_state.current_view == "changelog":
+        show_changelog()
+    else:
+        show_projects_list()
 
 if __name__ == "__main__":
     main() 
