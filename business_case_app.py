@@ -15,7 +15,9 @@ st.set_page_config(
 
 # Путь к Excel файлам
 EXCEL_FILES = [
-    "Бизнес_кейс_Михненко_Екатерина.xlsx"
+    "Бизнес_кейс_Михненко_Екатерина.xlsx",
+    "Бизнес_кейс_Зырянова.xlsx",
+    "Бизнес_кейс. Руслан Амерханов.xlsx"
 ]
 PROJECTS_FILE = "projects_database.json"
 CHANGELOG_FILE = "changelog.json"
@@ -47,59 +49,42 @@ if 'changelog' not in st.session_state:
     st.session_state.changelog = []
 
 def generate_sample_status_data():
-    """Генерируем тестовые данные для статусов инициатив"""
+    """Генерируем данные для статусов инициатив на основе загруженных проектов"""
     status_data = pd.DataFrame({
         "Инициатива": [
-            "Увеличение конверсии сайта",
-            "Внедрение CRM системы", 
-            "Автоматизация отчетности",
-            "Обучение менеджеров",
-            "Оптимизация логистики",
-            "Цифровизация процессов"
+            "Династия врачей - увеличение выручки",
+            "КЭВ - Конверсия клиентов", 
+            "Lead to Appointment - Конверсия"
         ],
-        "Статус": ["L3", "L2", "L4", "L1", "L3", "L5"],
+        "Статус": ["L3", "L2", "L4"],
         "Владелец": [
-            "А. Петров",
-            "М. Иванова", 
-            "С. Сидоров",
-            "Н. Козлова",
-            "В. Попов",
-            "Е. Морозова"
+            "Екатерина Михайленко",
+            "Зырянова", 
+            "Руслан Амерханов"
         ],
-        "Прогресс (%)": [75, 45, 90, 20, 65, 100],
-        "Плановый эффект (млн руб)": [35, 120, 15, 8, 45, 200],
-        "Фактический эффект (млн руб)": [28, 0, 14, 0, 30, 195],
+        "Прогресс (%)": [75, 45, 90],
+        "Плановый эффект (млн руб)": [35, 120, 35],
+        "Фактический эффект (млн руб)": [28, 50, 30],
         "Дата начала": [
-            "2024-01-15", "2024-03-01", "2023-11-01", 
-            "2024-06-01", "2024-02-15", "2023-08-01"
+            "2024-01-15", "2024-03-01", "2024-02-01"
         ],
         "Планируемое завершение": [
-            "2024-12-31", "2025-01-31", "2024-08-31",
-            "2024-12-31", "2025-03-31", "2024-06-30"
+            "2024-12-31", "2025-01-31", "2024-11-30"
         ],
         "Ключевые вехи": [
-            "Настройка аналитики, A/B тесты",
-            "Выбор решения, интеграция",
-            "Автоматические дашборды",
-            "Программа обучения, сертификация", 
-            "Новые маршруты, склады",
-            "Полная автоматизация"
+            "Цифровизация процессов, увеличение доходимости",
+            "Анализ КЭВ, усиление процессов",
+            "Ролевки, обучение менеджеров"
         ],
         "Риски": [
-            "Низкий трафик в Q4",
-            "Сложность интеграции",
-            "Сопротивление пользователей",
-            "Высокая текучесть кадров",
-            "Рост стоимости топлива",
-            "Поддержка системы"
+            "Сопротивление изменениям",
+            "Сложность процессов",
+            "Высокая текучесть кадров"
         ],
         "Комментарии": [
             "Результаты превышают ожидания",
-            "Требуется дополнительный бюджет",
-            "Завершено досрочно",
-            "Поиск внешнего провайдера",
-            "Пилотный проект успешен",
-            "Достигнут ROI 300%"
+            "Требуется дополнительный анализ",
+            "Обучение в процессе"
         ]
     })
     return status_data
@@ -108,39 +93,118 @@ def load_excel_data():
     """Загружаем все листы из Excel файлов"""
     all_data = {}
     
-    # Используем только файл Михненко для всех проектов
-    master_file = "Бизнес_кейс_Михненко_Екатерина.xlsx"
+    # Маппинг файлов к проектам
+    file_to_project = {
+        "Бизнес_кейс_Михненко_Екатерина.xlsx": "business_case_1",
+        "Бизнес_кейс_Зырянова.xlsx": "business_case_2",
+        "Бизнес_кейс. Руслан Амерханов.xlsx": "business_case_3"
+    }
     
-    # Создаем тестовые данные без загрузки Excel файлов
-    default_sections = [
-        "a. Детали инициативы",
-        "b. Финансовое влияние", 
-        "c. Поддерживающие расчеты",
-        "d. Диаграмма Ганта",
-        "e. Мониторинг эффекта",
-        "f. Статус инициатив"
-    ]
+    # Загружаем каждый Excel файл
+    for excel_file in EXCEL_FILES:
+        try:
+            if os.path.exists(excel_file):
+                excel_data = pd.read_excel(excel_file, sheet_name=None)
+                filename = os.path.basename(excel_file).replace('.xlsx', '')
+                project_id = file_to_project.get(excel_file, "business_case_1")
+                
+                st.success(f"✅ Загружен файл: {filename}")
+                
+                for sheet_name, df in excel_data.items():
+                    # Очищаем и нормализуем данные
+                    cleaned_df = df.copy()
+                    
+                    # Удаляем полностью пустые строки и столбцы
+                    cleaned_df = cleaned_df.dropna(how='all').dropna(axis=1, how='all')
+                    
+                    # Переименовываем проблематичные колонки
+                    new_columns = []
+                    for i, col in enumerate(cleaned_df.columns):
+                        col_str = str(col)
+                        if col_str.startswith('Unnamed:') or col_str.isdigit() or col_str in ['nan', 'None'] or col_str.strip() == '':
+                            # Даем осмысленные названия
+                            if sheet_name == "a. Детали инициативы":
+                                new_columns.append(f"Поле_{i+1}")
+                            elif sheet_name == "b. Финансовое влияние":
+                                new_columns.append(f"Финансы_{i+1}")
+                            else:
+                                new_columns.append(f"Столбец_{i+1}")
+                        else:
+                            new_columns.append(col_str)
+                    
+                    cleaned_df.columns = new_columns
+                    
+                    # Очищаем от пустых значений и преобразуем в строки
+                    cleaned_df = cleaned_df.fillna('')
+                    for col in cleaned_df.columns:
+                        try:
+                            cleaned_df[col] = cleaned_df[col].astype(str)
+                            cleaned_df[col] = cleaned_df[col].replace('nan', '')
+                            cleaned_df[col] = cleaned_df[col].replace('None', '')
+                            cleaned_df[col] = cleaned_df[col].replace('<NA>', '')
+                        except:
+                            cleaned_df[col] = ''
+                    
+                    # Удаляем строки где все значения пустые
+                    mask = cleaned_df.apply(lambda row: all(str(val).strip() == '' for val in row), axis=1)
+                    cleaned_df = cleaned_df[~mask]
+                    
+                    # Если данных недостаточно, дополняем базовой структурой
+                    if len(cleaned_df) == 0:
+                        if sheet_name == "a. Детали инициативы":
+                            cleaned_df = pd.DataFrame({
+                                "Параметр": ["Название инициативы", "Описание инициативы", "Ответственный за инициативу"],
+                                "Значение": ["", "", ""],
+                                "Комментарий": ["", "", ""]
+                            })
+                        else:
+                            cleaned_df = pd.DataFrame({
+                                "Параметр": [""],
+                                "Значение": [""],
+                                "Комментарий": [""]
+                            })
+                    
+                    # Сохраняем данные с ключом проекта и раздела
+                    section_key = f"{project_id}_{sheet_name}"
+                    all_data[section_key] = cleaned_df.copy()
+                    
+                    # Также сохраняем под простым названием раздела для обратной совместимости
+                    all_data[sheet_name] = cleaned_df.copy()
+                    
+        except Exception as e:
+            st.error(f"❌ Не удалось загрузить файл {excel_file}: {e}")
+            continue
     
-    for section in default_sections:
-        empty_df = pd.DataFrame({
-            "Параметр": ["Пример параметра"],
-            "Значение": ["Пример значения"],
-            "Комментарий": ["Пример комментария"]
-        })
-        all_data[section] = empty_df
+    # Если ничего не загрузилось, создаем тестовые данные
+    if not all_data:
+        default_sections = [
+            "a. Детали инициативы",
+            "b. Финансовое влияние", 
+            "c. Поддерживающие расчеты",
+            "d. Диаграмма Ганта",
+            "e. Мониторинг эффекта",
+            "f. Статус инициатив"
+        ]
         
-        # Для всех проектов
-        for project_id in ["business_case_1", "business_case_2", "business_case_3"]:
-            all_data[f"{project_id}_{section}"] = empty_df.copy()
+        for section in default_sections:
+            empty_df = pd.DataFrame({
+                "Параметр": ["Пример параметра"],
+                "Значение": ["Пример значения"],
+                "Комментарий": ["Пример комментария"]
+            })
+            all_data[section] = empty_df
+            
+            # Для всех проектов
+            for project_id in ["business_case_1", "business_case_2", "business_case_3"]:
+                all_data[f"{project_id}_{section}"] = empty_df.copy()
     
-    # Добавляем тестовые данные для статусов инициатив если их нет
+    # Добавляем тестовые данные для статусов инициатив
     status_section = "f. Статус инициатив"
-    if status_section not in all_data or all_data[status_section].empty:
-        sample_data = generate_sample_status_data()
-        all_data[status_section] = sample_data
-        
-        for project_id in ["business_case_1", "business_case_2", "business_case_3"]:
-            all_data[f"{project_id}_{status_section}"] = sample_data.copy()
+    sample_data = generate_sample_status_data()
+    all_data[status_section] = sample_data
+    
+    for project_id in ["business_case_1", "business_case_2", "business_case_3"]:
+        all_data[f"{project_id}_{status_section}"] = sample_data.copy()
     
     return all_data
 
